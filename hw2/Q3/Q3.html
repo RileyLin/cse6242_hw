@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+
+<head>
+  <title>Line Charts</title>
+  <meta charset="utf-8">
+
+  <script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+    }
+
+    svg {
+      display: block;
+      margin: 20px auto;
+    }
+
+    .line {
+      fill: none;
+      stroke-width: 2px;
+    }
+
+    .line-label {
+      font-size: 12px;
+    }
+
+    .axis text {
+      font-size: 11px;
+    }
+
+    .axis-label {
+      font-size: 13px;
+    }
+
+    .title {
+      font-size: 16px;
+      font-weight: bold;
+      text-anchor: middle;
+    }
+
+    .circle-marker {
+      fill: white;
+      stroke-width: 2px;
+    }
+
+    .rank-text {
+      font-size: 10px;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    #signature {
+      text-align: center;
+      margin: 20px;
+      font-size: 14px;
+    }
+  </style>
+
+</head>
+
+<body>
+
+  <script type="text/javascript">
+
+    // Chart dimensions and margin convention
+    var margin = {top: 50, right: 150, bottom: 60, left: 70};
+    var width = 960 - margin.left - margin.right;
+    var height = 500 - margin.top - margin.bottom;
+
+    // Parse date from CSV
+    var parseDate = d3.timeParse("%Y-%m-%d");
+
+    // Game names for processing
+    var allGames = ["Catan", "Dominion", "Codenames", "Terraforming Mars", "Gloomhaven", "Magic: The Gathering", "Dixit", "Monopoly"];
+    var selectedGames = ["Catan", "Codenames", "Terraforming Mars", "Gloomhaven"];
+
+    // Color scale
+    var color = d3.scaleOrdinal(d3.schemeCategory10);
+    
+    // Helper function to get color for a game
+    function getColor(game) {
+      return color(allGames.indexOf(game));
+    }
+
+    // Load data
+    d3.csv("boardgame_ratings.csv").then(function(data) {
+
+      // Parse data
+      data.forEach(function(d) {
+        d.date = parseDate(d.date);
+
+        // Convert all count and rank columns to numbers
+        allGames.forEach(function(game) {
+          d[game + "_count"] = +d[game + "=count"];
+          d[game + "_rank"] = +d[game + "=rank"];
+        });
+      });
+
+      // Calculate max count for all games (for Chart 1)
+      var maxCountAll = d3.max(data, function(d) {
+        return d3.max(allGames, function(game) {
+          return d[game + "_count"];
+        });
+      });
+
+      // Calculate max count for selected games (for Charts 2, 3a, 3b)
+      var maxCountSelected = d3.max(data, function(d) {
+        return d3.max(selectedGames, function(game) {
+          return d[game + "_count"];
+        });
+      });
+
+      // Filter data for 3-month intervals (for circle markers)
+      var threeMonthData = data.filter(function(d, i) {
+        var month = d.date.getMonth();
+        return month === 0 || month === 3 || month === 6 || month === 9; // Jan, Apr, Jul, Oct
+      });
+
+      // CHART 1: Basic Line Chart
+      createChart1(data, maxCountAll);
+
+      // CHART 2: Line Chart with Rankings
+      createChart2(data, threeMonthData, maxCountAll);
+
+      // CHART 3a: Square Root Scale
+      createChart3a(data, threeMonthData, maxCountAll);
+
+      // CHART 3b: Log Scale
+      createChart3b(data, threeMonthData, maxCountAll);
+    });
+
+    // CHART 1: Basic Line Chart (all 8 games)
+    function createChart1(data, maxCount) {
+      var svg = d3.select("body").append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .attr("id", "svg-a");
+
+      svg.append("text")
+        .attr("id", "title-a")
+        .attr("class", "title")
+        .attr("x", (width + margin.left + margin.right) / 2)
+        .attr("y", 25)
+        .text("Number of Ratings 2016-2020");
+
+      var g = svg.append("g")
+        .attr("id", "plot-a")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      // Scales
+      var xScale = d3.scaleTime()
+        .domain(d3.extent(data, function(d) { return d.date; }))
+        .range([0, width]);
+
+      var yScale = d3.scaleLinear()
+        .domain([0, maxCount])
+        .range([height, 0]);
+
+      // Line generator
+      var line = d3.line()
+        .x(function(d) { return xScale(d.date); })
+        .y(function(d) { return yScale(d.count); });
+
+      // Lines group
+      var linesG = g.append("g").attr("id", "lines-a");
+
+      // Draw lines for all 8 games
+      allGames.forEach(function(game) {
+        var gameData = data.map(function(d) {
+          return { date: d.date, count: d[game + "_count"] };
+        });
+
+        // Draw line
+        linesG.append("path")
+          .datum(gameData)
+          .attr("class", "line")
+          .attr("d", line)
+          .attr("stroke", getColor(game));
+
+        // Add line label at the end
+        var lastPoint = gameData[gameData.length - 1];
+        linesG.append("text")
+          .attr("class", "line-label")
+          .attr("x", xScale(lastPoint.date) + 5)
+          .attr("y", yScale(lastPoint.count))
+          .attr("dy", "0.35em")
+          .attr("fill", getColor(game))
+          .text(game);
+      });
+
+      // X-axis
+      var xAxisG = g.append("g")
+        .attr("id", "x-axis-a")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3.axisBottom(xScale)
+          .ticks(d3.timeMonth.every(3))
+          .tickFormat(d3.timeFormat("%b %y")));
+
+      xAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("x", width / 2)
+        .attr("y", 40)
+        .attr("fill", "black")
+        .text("Month");
+
+      // Y-axis
+      var yAxisG = g.append("g")
+        .attr("id", "y-axis-a")
+        .call(d3.axisLeft(yScale));
+
+      yAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -50)
+        .attr("fill", "black")
+        .text("Num of Ratings");
+    }
+
+    // CHART 2: Line Chart with Rankings (4 selected games)
+    function createChart2(data, threeMonthData, maxCount) {
+      var svg = d3.select("body").append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .attr("id", "svg-b");
+
+      svg.append("text")
+        .attr("id", "title-b")
+        .attr("class", "title")
+        .attr("x", (width + margin.left + margin.right) / 2)
+        .attr("y", 25)
+        .text("Number of Ratings 2016-2020 with Rankings");
+
+      var g = svg.append("g")
+        .attr("id", "plot-b")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      // Scales
+      var xScale = d3.scaleTime()
+        .domain(d3.extent(data, function(d) { return d.date; }))
+        .range([0, width]);
+
+      var yScale = d3.scaleLinear()
+        .domain([0, maxCount])
+        .range([height, 0]);
+
+      // Line generator
+      var line = d3.line()
+        .x(function(d) { return xScale(d.date); })
+        .y(function(d) { return yScale(d.count); });
+
+      // Lines group
+      var linesG = g.append("g").attr("id", "lines-b");
+
+      // Draw lines for all games
+      allGames.forEach(function(game) {
+        var gameData = data.map(function(d) {
+          return { date: d.date, count: d[game + "_count"], rank: d[game + "_rank"] };
+        });
+
+        // Draw line
+        linesG.append("path")
+          .datum(gameData)
+          .attr("class", "line")
+          .attr("d", line)
+          .attr("stroke", getColor(game));
+
+        // Add line label
+        var lastPoint = gameData[gameData.length - 1];
+        linesG.append("text")
+          .attr("class", "line-label")
+          .attr("x", xScale(lastPoint.date) + 5)
+          .attr("y", yScale(lastPoint.count))
+          .attr("dy", "0.35em")
+          .attr("fill", getColor(game))
+          .text(game);
+      });
+
+      // X-axis
+      var xAxisG = g.append("g")
+        .attr("id", "x-axis-b")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3.axisBottom(xScale)
+          .ticks(d3.timeMonth.every(3))
+          .tickFormat(d3.timeFormat("%b %y")));
+
+      xAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("x", width / 2)
+        .attr("y", 40)
+        .attr("fill", "black")
+        .text("Month");
+
+      // Y-axis
+      var yAxisG = g.append("g")
+        .attr("id", "y-axis-b")
+        .call(d3.axisLeft(yScale));
+
+      yAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -50)
+        .attr("fill", "black")
+        .text("Num of Ratings");
+
+      // Symbols group (circles with rankings)
+      var symbolsG = g.append("g").attr("id", "symbols-b");
+
+      // Add circle markers for 3-month intervals - only for selected games
+      selectedGames.forEach(function(game) {
+        var gameColor = getColor(game); // Get color for this game
+        
+        threeMonthData.forEach(function(d) {
+          var count = d[game + "_count"];
+          var rank = d[game + "_rank"];
+
+          // Draw circle
+          symbolsG.append("circle")
+            .attr("class", "circle-marker")
+            .attr("cx", xScale(d.date))
+            .attr("cy", yScale(count))
+            .attr("r", 10)
+            .attr("fill", gameColor)
+            .attr("stroke", "white")
+            .attr("stroke-width", 2);
+
+          // Add rank text
+          symbolsG.append("text")
+            .attr("class", "rank-text")
+            .attr("x", xScale(d.date))
+            .attr("y", yScale(count))
+            .text(rank);
+        });
+      });
+
+      // Legend
+      var legendG = svg.append("g")
+        .attr("id", "legend-b")
+        .attr("transform", "translate(" + (width + margin.left + 10) + "," + (margin.top + 20) + ")");
+
+      legendG.append("circle")
+        .attr("class", "circle-marker")
+        .attr("cx", 10)
+        .attr("cy", 0)
+        .attr("r", 10)
+        .attr("stroke", "black");
+
+      legendG.append("text")
+        .attr("x", 25)
+        .attr("y", 0)
+        .attr("dy", "0.35em")
+        .attr("font-size", "12px")
+        .text("BoardGameGeek Rank");
+    }
+
+    // CHART 3a: Square Root Scale
+    function createChart3a(data, threeMonthData, maxCount) {
+      var svg = d3.select("body").append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .attr("id", "svg-c-1");
+
+      svg.append("text")
+        .attr("id", "title-c-1")
+        .attr("class", "title")
+        .attr("x", (width + margin.left + margin.right) / 2)
+        .attr("y", 25)
+        .text("Number of Ratings 2016-2020 (Square root Scale)");
+
+      var g = svg.append("g")
+        .attr("id", "plot-c-1")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      // Scales
+      var xScale = d3.scaleTime()
+        .domain(d3.extent(data, function(d) { return d.date; }))
+        .range([0, width]);
+
+      var yScale = d3.scaleSqrt()
+        .domain([0, maxCount])
+        .range([height, 0]);
+
+      // Line generator
+      var line = d3.line()
+        .x(function(d) { return xScale(d.date); })
+        .y(function(d) { return yScale(d.count); });
+
+      // Lines group
+      var linesG = g.append("g").attr("id", "lines-c-1");
+
+      // Draw lines for all games
+      allGames.forEach(function(game) {
+        var gameData = data.map(function(d) {
+          return { date: d.date, count: d[game + "_count"], rank: d[game + "_rank"] };
+        });
+
+        // Draw line
+        linesG.append("path")
+          .datum(gameData)
+          .attr("class", "line")
+          .attr("d", line)
+          .attr("stroke", getColor(game));
+
+        // Add line label
+        var lastPoint = gameData[gameData.length - 1];
+        linesG.append("text")
+          .attr("class", "line-label")
+          .attr("x", xScale(lastPoint.date) + 5)
+          .attr("y", yScale(lastPoint.count))
+          .attr("dy", "0.35em")
+          .attr("fill", getColor(game))
+          .text(game);
+      });
+
+      // X-axis
+      var xAxisG = g.append("g")
+        .attr("id", "x-axis-c-1")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3.axisBottom(xScale)
+          .ticks(d3.timeMonth.every(3))
+          .tickFormat(d3.timeFormat("%b %y")));
+
+      xAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("x", width / 2)
+        .attr("y", 40)
+        .attr("fill", "black")
+        .text("Month");
+
+      // Y-axis
+      var yAxisG = g.append("g")
+        .attr("id", "y-axis-c-1")
+        .call(d3.axisLeft(yScale));
+
+      yAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -50)
+        .attr("fill", "black")
+        .text("Num of Ratings");
+
+      // Symbols group (circles with rankings)
+      var symbolsG = g.append("g").attr("id", "symbols-c-1");
+
+      // Add circle markers for 3-month intervals - only for selected games
+      selectedGames.forEach(function(game) {
+        var gameColor = getColor(game); // Get color for this game
+        
+        threeMonthData.forEach(function(d) {
+          var count = d[game + "_count"];
+          var rank = d[game + "_rank"];
+
+          // Draw circle
+          symbolsG.append("circle")
+            .attr("class", "circle-marker")
+            .attr("cx", xScale(d.date))
+            .attr("cy", yScale(count))
+            .attr("r", 10)
+            .attr("fill", gameColor)
+            .attr("stroke", "white")
+            .attr("stroke-width", 2);
+
+          // Add rank text
+          symbolsG.append("text")
+            .attr("class", "rank-text")
+            .attr("x", xScale(d.date))
+            .attr("y", yScale(count))
+            .text(rank);
+        });
+      });
+
+      // Legend
+      var legendG = svg.append("g")
+        .attr("id", "legend-c-1")
+        .attr("transform", "translate(" + (width + margin.left + 10) + "," + (margin.top + 20) + ")");
+
+      legendG.append("circle")
+        .attr("class", "circle-marker")
+        .attr("cx", 10)
+        .attr("cy", 0)
+        .attr("r", 10)
+        .attr("stroke", "black");
+
+      legendG.append("text")
+        .attr("x", 25)
+        .attr("y", 0)
+        .attr("dy", "0.35em")
+        .attr("font-size", "12px")
+        .text("BoardGameGeek Rank");
+    }
+
+    // CHART 3b: Log Scale
+    function createChart3b(data, threeMonthData, maxCount) {
+      var svg = d3.select("body").append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .attr("id", "svg-c-2");
+
+      svg.append("text")
+        .attr("id", "title-c-2")
+        .attr("class", "title")
+        .attr("x", (width + margin.left + margin.right) / 2)
+        .attr("y", 25)
+        .text("Number of Ratings 2016-2020 (Log Scale)");
+
+      var g = svg.append("g")
+        .attr("id", "plot-c-2")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      // Scales
+      var xScale = d3.scaleTime()
+        .domain(d3.extent(data, function(d) { return d.date; }))
+        .range([0, width]);
+
+      var yScale = d3.scaleLog()
+        .domain([1, maxCount])
+        .range([height, 0]);
+
+      // Line generator
+      var line = d3.line()
+        .x(function(d) { return xScale(d.date); })
+        .y(function(d) { return yScale(d.count); });
+
+      // Lines group
+      var linesG = g.append("g").attr("id", "lines-c-2");
+
+      // Draw lines for all games
+      allGames.forEach(function(game) {
+        var gameData = data.map(function(d) {
+          return { date: d.date, count: d[game + "_count"], rank: d[game + "_rank"] };
+        });
+
+        // Draw line
+        linesG.append("path")
+          .datum(gameData)
+          .attr("class", "line")
+          .attr("d", line)
+          .attr("stroke", getColor(game));
+
+        // Add line label
+        var lastPoint = gameData[gameData.length - 1];
+        linesG.append("text")
+          .attr("class", "line-label")
+          .attr("x", xScale(lastPoint.date) + 5)
+          .attr("y", yScale(lastPoint.count))
+          .attr("dy", "0.35em")
+          .attr("fill", getColor(game))
+          .text(game);
+      });
+
+      // X-axis
+      var xAxisG = g.append("g")
+        .attr("id", "x-axis-c-2")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3.axisBottom(xScale)
+          .ticks(d3.timeMonth.every(3))
+          .tickFormat(d3.timeFormat("%b %y")));
+
+      xAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("x", width / 2)
+        .attr("y", 40)
+        .attr("fill", "black")
+        .text("Month");
+
+      // Y-axis
+      var yAxisG = g.append("g")
+        .attr("id", "y-axis-c-2")
+        .call(d3.axisLeft(yScale));
+
+      yAxisG.append("text")
+        .attr("class", "axis-label")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -50)
+        .attr("fill", "black")
+        .text("Num of Ratings");
+
+      // Symbols group (circles with rankings)
+      var symbolsG = g.append("g").attr("id", "symbols-c-2");
+
+      // Add circle markers for 3-month intervals - only for selected games
+      selectedGames.forEach(function(game) {
+        var gameColor = getColor(game); // Get color for this game
+        
+        threeMonthData.forEach(function(d) {
+          var count = d[game + "_count"];
+          var rank = d[game + "_rank"];
+
+          // Draw circle
+          symbolsG.append("circle")
+            .attr("class", "circle-marker")
+            .attr("cx", xScale(d.date))
+            .attr("cy", yScale(count))
+            .attr("r", 10)
+            .attr("fill", gameColor)
+            .attr("stroke", "white")
+            .attr("stroke-width", 2);
+
+          // Add rank text
+          symbolsG.append("text")
+            .attr("class", "rank-text")
+            .attr("x", xScale(d.date))
+            .attr("y", yScale(count))
+            .text(rank);
+        });
+      });
+
+      // Legend
+      var legendG = svg.append("g")
+        .attr("id", "legend-c-2")
+        .attr("transform", "translate(" + (width + margin.left + 10) + "," + (margin.top + 20) + ")");
+
+      legendG.append("circle")
+        .attr("class", "circle-marker")
+        .attr("cx", 10)
+        .attr("cy", 0)
+        .attr("r", 10)
+        .attr("stroke", "black");
+
+      legendG.append("text")
+        .attr("x", 25)
+        .attr("y", 0)
+        .attr("dy", "0.35em")
+        .attr("font-size", "12px")
+        .text("BoardGameGeek Rank");
+    }
+
+  </script>
+
+  <div id='signature'>wlin99</div>
+</body>

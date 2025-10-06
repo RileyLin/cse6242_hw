@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<head>
+<style>
+
+path.link {
+  fill: none;
+  stroke: #666;
+  stroke-width: 1.5px;
+}
+
+/* Edge styling for similar games (value=0) */
+path.link.similar {
+  stroke: gray;
+  stroke-width: 3px;
+  stroke-dasharray: none;
+}
+
+/* Edge styling for not similar games (value=1) */
+path.link.not-similar {
+  stroke: green;
+  stroke-width: 1px;
+  stroke-dasharray: 5,5;
+}
+
+circle {
+  fill: #ccc;
+  stroke: #fff;
+  stroke: black;
+  stroke-width: 1.5px;
+}
+
+/* Pinned node styling */
+circle.pinned {
+  stroke: red;
+  stroke-width: 3px;
+}
+
+text {
+  fill: #000;
+  font: 10px sans-serif;
+  pointer-events: none;
+}
+
+text.node-label {
+  font-weight: bold;
+}
+
+#credit {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+</style>
+<meta charset="utf-8">
+<title></title>
+</head>
+
+<body>
+<script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+<script>
+
+d3.dsv(",", "board_games.csv", function(d) {
+  return {
+    source: d.source,
+    target: d.target,
+    value: +d.value
+  }
+}).then(function(data) {
+
+  var links = data;
+
+  var nodes = {};
+
+  // compute the distinct nodes from the links.
+  links.forEach(function(link) {
+      link.source = nodes[link.source] || (nodes[link.source] = {name: link.source});
+      link.target = nodes[link.target] || (nodes[link.target] = {name: link.target});
+  });
+
+  // Calculate degrees for each node
+  var degrees = {};
+  links.forEach(function(link) {
+      var source = link.source.name || link.source;
+      var target = link.target.name || link.target;
+      degrees[source] = (degrees[source] || 0) + 1;
+      degrees[target] = (degrees[target] || 0) + 1;
+  });
+
+  // Add degree to each node
+  d3.values(nodes).forEach(function(node) {
+      node.degree = degrees[node.name] || 0;
+  });
+
+  // Find min and max degree for scaling
+  var minDegree = d3.min(d3.values(nodes), function(d) { return d.degree; });
+  var maxDegree = d3.max(d3.values(nodes), function(d) { return d.degree; });
+
+  // Create radius scale (linear scale for node size)
+  var radiusScale = d3.scaleLinear()
+      .domain([minDegree, maxDegree])
+      .range([5, 20]); // Min radius 5, max radius 20
+
+  // Create color scale with 5 gradations (ColorBrewer-inspired)
+  var colorScale = d3.scaleQuantize()
+      .domain([minDegree, maxDegree])
+      .range(["#fee5d9", "#fcae91", "#fb6a4a", "#de2d26", "#a50f15"]); // Light to dark red
+
+  var width = 1200,
+      height = 700;
+
+  var force = d3.forceSimulation()
+      .nodes(d3.values(nodes))
+      .force("link", d3.forceLink(links).distance(100))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force("x", d3.forceX())
+      .force("y", d3.forceY())
+      .force("charge", d3.forceManyBody().strength(-250))
+      .alphaTarget(1)
+      .on("tick", tick);
+
+  var svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height);
+
+  // Add credit text in top-right corner
+  svg.append("text")
+      .attr("id", "credit")
+      .attr("x", width - 10)
+      .attr("y", 20)
+      .attr("text-anchor", "end")
+      .text("wlin99");
+
+  // add the links
+  var path = svg.append("g")
+      .selectAll("path")
+      .data(links)
+      .enter()
+      .append("path")
+      .attr("class", function(d) {
+          // Apply different classes based on value
+          if (d.value == 0) {
+              return "link similar";
+          } else {
+              return "link not-similar";
+          }
+      });
+
+  // define the nodes
+  var node = svg.selectAll(".node")
+      .data(force.nodes())
+      .enter().append("g")
+      .attr("class", "node")
+      .call(d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended))
+      .on("dblclick", dblclicked);
+
+  // add the nodes
+  node.append("circle")
+      .attr("id", function(d){
+         return (d.name.replace(/\s+/g,'').toLowerCase());
+      })
+      .attr("r", function(d) {
+          // Scale radius based on degree
+          return radiusScale(d.degree);
+      })
+      .style("fill", function(d) {
+          // Color based on degree
+          return colorScale(d.degree);
+      });
+
+  // Add node labels (bold text at top-right of each node)
+  node.append("text")
+      .attr("class", "node-label")
+      .attr("dx", function(d) {
+          // Position to the right of the node
+          return radiusScale(d.degree) + 2;
+      })
+      .attr("dy", function(d) {
+          // Position at the top of the node
+          return -radiusScale(d.degree) - 2;
+      })
+      .text(function(d) {
+          return d.name;
+      });
+
+  // add the curvy lines
+  function tick() {
+      path.attr("d", function(d) {
+          var dx = d.target.x - d.source.x,
+              dy = d.target.y - d.source.y,
+              dr = Math.sqrt(dx * dx + dy * dy);
+          return "M" +
+              d.source.x + "," +
+              d.source.y + "A" +
+              dr + "," + dr + " 0 0,1 " +
+              d.target.x + "," +
+              d.target.y;
+      });
+
+      node.attr("transform", function(d) {
+          return "translate(" + d.x + "," + d.y + ")"; 
+      });
+  };
+
+  function dragstarted(d) {
+      // Pin the node and change color FIRST
+      d.fixed = true;
+      // Add visual distinction for pinned node - change fill color to yellow
+      // Use both .style and .attr to ensure color change is applied
+      d3.select(this).select("circle")
+        .classed("pinned", true)
+        .attr("fill", "yellow")
+        .style("fill", "yellow");
+
+      if (!d3.event.active) force.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+  };
+
+  function dragged(d) {
+      d.fx = d3.event.x;
+      d.fy = d3.event.y;
+  };
+
+  function dragended(d) {
+      if (!d3.event.active) force.alphaTarget(0);
+      if (d.fixed == true) {
+          // Keep node fixed at current position
+          d.fx = d.x;
+          d.fy = d.y;
+      }
+      else {
+          // Allow node to move freely
+          d.fx = null;
+          d.fy = null;
+      }
+  };
+
+  function dblclicked(d) {
+      // Unpin the node on double-click
+      d.fixed = false;
+      d.fx = null;
+      d.fy = null;
+      // Remove visual distinction - restore original color based on degree
+      // Use both .attr and .style to ensure color change is applied
+      var originalColor = colorScale(d.degree);
+      d3.select(this).select("circle")
+        .classed("pinned", false)
+        .attr("fill", originalColor)
+        .style("fill", originalColor);
+      // Restart the simulation
+      if (!d3.event.active) force.alphaTarget(0.3).restart();
+  };
+  
+}).catch(function(error) {
+  console.log(error);
+});
+
+</script>
+</body>
+</html>

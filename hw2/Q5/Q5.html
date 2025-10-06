@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+    <title>Wildlife Trafficking Incidents</title>
+    
+    <!-- Import required libraries -->
+    <script src="../lib/d3.v5.min.js"></script>
+    <script src="../lib/topojson.v2.min.js"></script>
+    <script src="../lib/d3-legend.min.js"></script>
+    <script src="../lib/d3-tip.min.js"></script>
+    <script src="../lib/d3-geo-projection.v2.min.js"></script>
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        #yearDropdown {
+            display: block;
+            margin: 20px auto;
+            padding: 8px;
+            font-size: 14px;
+        }
+
+        .country {
+            stroke: #fff;
+            stroke-width: 0.5px;
+        }
+
+        .country:hover {
+            stroke: #333;
+            stroke-width: 2px;
+        }
+
+        /* Tooltip styles */
+        #tooltip {
+            position: absolute;
+            line-height: 1.5;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+        }
+
+        #signature {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+
+        .legendQuant {
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Wildlife Trafficking Incidents by Country</h1>
+    
+    <!-- Dropdown will be populated dynamically -->
+    <select id="yearDropdown"></select>
+
+    <!-- Tooltip element -->
+    <div id="tooltip"></div>
+
+    <script>
+        // Define margin and dimensions for svg
+        var margin = {top: 20, right: 20, bottom: 20, left: 20};
+        var width = 960 - margin.left - margin.right;
+        var height = 600 - margin.top - margin.bottom;
+
+        // Create svg
+        var svg = d3.select("body")
+            .append("svg")
+            .attr("id", "choropleth")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom);
+
+        // Create color scale (will be updated with actual data)
+        // Using neutral blue scale - 4 gradations from light to dark
+        var colorScale = d3.scaleQuantile()
+            .range(["#eff3ff", "#bdd7e7", "#6baed6", "#2171b5"]);
+
+        // Get tooltip element
+        var tooltip = d3.select("#tooltip");
+
+        // Define projection and path required for Choropleth
+        // For grading, set the name of functions for projection and path as "projection" and "path"
+        var projection = d3.geoNaturalEarth1()
+            .scale(150)
+            .translate([width / 2, height / 2]);
+
+        var path = d3.geoPath()
+            .projection(projection);
+
+        // Global variable to store all data
+        var allTraffickingData;
+
+        // Load both files using Promise.all
+        Promise.all([
+            d3.json("data/world_countries.json"),
+            d3.csv("data/wildlife_trafficking.csv")
+        ]).then(function(data) {
+            ready(null, data[0], data[1]);
+        });
+
+        // This function should be called once the data from files have been read
+        function ready(error, world, traffickingData) {
+            if (error) throw error;
+
+            // Store trafficking data globally
+            allTraffickingData = traffickingData;
+
+            // Extract unique years from trafficking data and sort in increasing order
+            var years = Array.from(new Set(traffickingData.map(d => d.Year)))
+                .sort((a, b) => a - b);
+
+            // Append years to dropdown
+            var dropdown = d3.select("#yearDropdown");
+            dropdown.selectAll("option")
+                .data(years)
+                .enter()
+                .append("option")
+                .text(d => d)
+                .attr("value", d => d);
+
+            // Event listener for dropdown - update map and legend on change
+            dropdown.on("change", function() {
+                var selectedYear = this.value;
+                createMapAndLegend(world, allTraffickingData, selectedYear);
+            });
+
+            // Create choropleth with default option (first year)
+            createMapAndLegend(world, allTraffickingData, years[0]);
+        }
+
+        // This function creates/updates choropleth and legend for a selected year
+        function createMapAndLegend(world, traffickingData, selectedYear) {
+            // Filter data for selected year
+            var yearData = traffickingData.filter(d => d.Year === selectedYear);
+
+            // Create a map of country to data for quick lookup
+            var dataByCountry = {};
+            yearData.forEach(function(d) {
+                dataByCountry[d["Country of Incident"]] = {
+                    incidents: +d.Number_of_Incidents || 0,
+                    fine: d.Average_Fine,
+                    imprisonment: d.Average_Imprisonment
+                };
+            });
+
+            // Get all incident counts for this year (for quantile scale)
+            var incidentCounts = yearData
+                .map(d => +d.Number_of_Incidents)
+                .filter(d => d > 0);
+
+            // Update color scale domain with incident counts
+            colorScale.domain(incidentCounts);
+
+            // world is already in GeoJSON format (FeatureCollection)
+            var countries = world.features;
+
+            // Remove existing countries and legend
+            svg.selectAll("#countries").remove();
+            svg.selectAll("#legend").remove();
+
+            // Create countries group
+            var countriesGroup = svg.append("g")
+                .attr("id", "countries");
+
+            // Draw country paths
+            countriesGroup.selectAll("path")
+                .data(countries)
+                .enter()
+                .append("path")
+                .attr("class", "country")
+                .attr("d", path)
+                .attr("fill", function(d) {
+                    var countryName = d.properties.name;
+                    var countryData = dataByCountry[countryName];
+                    
+                    if (countryData && countryData.incidents > 0) {
+                        return colorScale(countryData.incidents);
+                    } else {
+                        return "#ccc"; // Gray for no data
+                    }
+                })
+                .on("mouseover", function(d) {
+                    var countryName = d.properties.name;
+                    var countryData = dataByCountry[countryName];
+                    
+                    // Build tooltip content
+                    var content = "<strong>" + countryName + "</strong><br/>";
+                    content += "Year: " + selectedYear + "<br/>";
+                    
+                    if (countryData && countryData.incidents > 0) {
+                        content += "Incidents: " + countryData.incidents + "<br/>";
+                        
+                        // Format fine and imprisonment to 2 decimals or show N/A
+                        if (countryData.fine && countryData.fine !== "") {
+                            var fine = parseFloat(countryData.fine);
+                            content += "Avg Fine: $" + fine.toFixed(2) + "<br/>";
+                        } else {
+                            content += "Avg Fine: N/A<br/>";
+                        }
+                        
+                        if (countryData.imprisonment && countryData.imprisonment !== "") {
+                            var imprisonment = parseFloat(countryData.imprisonment);
+                            content += "Avg Imprisonment: " + imprisonment.toFixed(2) + " months";
+                        } else {
+                            content += "Avg Imprisonment: N/A";
+                        }
+                    } else {
+                        content += "Incidents: N/A<br/>";
+                        content += "Avg Fine: N/A<br/>";
+                        content += "Avg Imprisonment: N/A";
+                    }
+                    
+                    // Show and position tooltip
+                    tooltip
+                        .style("display", "block")
+                        .html(content)
+                        .style("left", (d3.event.pageX + 10) + "px")
+                        .style("top", (d3.event.pageY - 28) + "px");
+                })
+                .on("mouseout", function() {
+                    tooltip.style("display", "none");
+                });
+
+            // Create legend using d3-legend
+            var legendGroup = svg.append("g")
+                .attr("id", "legend")
+                .attr("transform", "translate(20, " + (height - 150) + ")");
+
+            // Get quantile thresholds
+            var quantiles = colorScale.quantiles();
+            
+            // Create legend scale
+            var legendScale = d3.scaleThreshold()
+                .domain(quantiles)
+                .range(colorScale.range());
+
+            // Create legend
+            var legend = d3.legendColor()
+                .labelFormat(d3.format(".2f"))
+                .scale(legendScale)
+                .shapePadding(5)
+                .shapeWidth(50)
+                .shapeHeight(20)
+                .labelOffset(10);
+
+            legendGroup.call(legend);
+
+            // Add legend title
+            legendGroup.insert("text", ":first-child")
+                .attr("x", 0)
+                .attr("y", -10)
+                .attr("font-weight", "bold")
+                .attr("font-size", "12px")
+                .text("Number of Incidents");
+        }
+    </script>
+
+    <div id="signature">wlin99</div>
+</body>
+</html>

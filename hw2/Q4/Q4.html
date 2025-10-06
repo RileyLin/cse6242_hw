@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+
+<head>
+  <title>Games Rating: 2015 - 2019</title>
+  <meta charset="utf-8">
+
+  <script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+    }
+
+    .line {
+      fill: none;
+      stroke-width: 2px;
+    }
+
+    .circle {
+      cursor: pointer;
+    }
+
+    .axis text {
+      font-size: 11px;
+    }
+
+    .axis-label {
+      font-size: 13px;
+    }
+
+    .title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .legend-text {
+      font-size: 12px;
+    }
+
+    .bar {
+      fill: steelblue;
+    }
+
+    .grid line {
+      stroke: lightgrey;
+      stroke-opacity: 0.7;
+      shape-rendering: crispEdges;
+    }
+
+    .grid path {
+      stroke-width: 0;
+    }
+
+    #bar_chart_title {
+      font-size: 14px;
+      font-weight: bold;
+      margin-top: 20px;
+      margin-bottom: 10px;
+      display: none;
+    }
+
+    #bar_chart {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <script>
+    // Dimensions and margins for the line chart (using margin convention)
+    var marginLine = { top: 60, right: 150, bottom: 60, left: 70 };
+    var widthLine = 960 - marginLine.left - marginLine.right;
+    var heightLine = 500 - marginLine.top - marginLine.bottom;
+
+    // Dimensions and margins for the bar chart
+    var marginBar = { top: 20, right: 50, bottom: 60, left: 150 };
+    var widthBar = 960 - marginBar.left - marginBar.right;
+    var heightBar = 300 - marginBar.top - marginBar.bottom;
+
+    // Create the line chart SVG
+    var svgLine = d3
+      .select("body")
+      .append("svg")
+      .attr("id", "line_chart")
+      .attr("width", widthLine + marginLine.left + marginLine.right)
+      .attr("height", heightLine + marginLine.top + marginLine.bottom);
+
+    var gLine = svgLine.append("g")
+      .attr("id", "container")
+      .attr("transform", "translate(" + marginLine.left + "," + marginLine.top + ")");
+
+    // Add title - MUST use regular hyphen, not en-dash
+    gLine.append("text")
+      .attr("id", "line_chart_title")
+      .attr("x", widthLine / 2)
+      .attr("y", -35)
+      .attr("text-anchor", "middle")
+      .attr("class", "title")
+      .text("Board games by Rating 2015-2019");
+
+    // Add GT username
+    gLine.append("text")
+      .attr("id", "credit")
+      .attr("x", widthLine / 2)
+      .attr("y", -15)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "12px")
+      .text("wlin99");
+
+    // Add bar chart title (initially hidden)
+    d3.select("body")
+      .append("div")
+      .attr("id", "bar_chart_title");
+
+    // Create the bar chart SVG (initially hidden)
+    var svgBar = d3
+      .select("body")
+      .append("svg")
+      .attr("id", "bar_chart")
+      .attr("width", widthBar + marginBar.left + marginBar.right)
+      .attr("height", heightBar + marginBar.top + marginBar.bottom);
+
+    var gBar = svgBar.append("g")
+      .attr("id", "container_2")
+      .attr("transform", "translate(" + marginBar.left + "," + marginBar.top + ")");
+
+    // Color scale for years
+    var colorScale = d3.scaleOrdinal()
+      .domain([2015, 2016, 2017, 2018, 2019])
+      .range(["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]);
+
+    // Load and process data
+    d3.csv("average-rating.csv").then(function (data) {
+      
+      // Filter data for years 2015-2019
+      var filteredData = data.filter(d => +d.year >= 2015 && +d.year <= 2019);
+
+      // Process data: round ratings down and aggregate
+      var aggregatedData = {};
+      
+      filteredData.forEach(function (d) {
+        var year = +d.year;
+        var rating = Math.floor(+d.average_rating);
+        var key = year + "_" + rating;
+        
+        if (!aggregatedData[key]) {
+          aggregatedData[key] = {
+            year: year,
+            rating: rating,
+            count: 0,
+            games: []
+          };
+        }
+        
+        aggregatedData[key].count++;
+        aggregatedData[key].games.push({
+          name: d.name,
+          users_rated: +d.users_rated
+        });
+      });
+
+      // Convert to array and sort games by users_rated (descending)
+      var processedData = [];
+      for (var key in aggregatedData) {
+        var entry = aggregatedData[key];
+        // CRITICAL: Sort games by users_rated descending for top 5
+        entry.games.sort((a, b) => b.users_rated - a.users_rated);
+        processedData.push(entry);
+      }
+
+      // Get all unique years and ratings to ensure complete data
+      var years = [2015, 2016, 2017, 2018, 2019];
+      
+      // Ratings are always 0-9 (standard 10-point scale)
+      // This ensures we have exactly 50 circles (10 ratings × 5 years)
+      var completeData = [];
+      
+      // Create a map for quick lookup of existing data
+      var dataMap = {};
+      processedData.forEach(function(d) {
+        dataMap[d.year + "_" + d.rating] = d;
+      });
+      
+      // IMPORTANT: Generate all 50 combinations (ratings 0-9 × years 2015-2019)
+      for (var rating = 0; rating <= 9; rating++) {
+        for (var yearIdx = 0; yearIdx < years.length; yearIdx++) {
+          var year = years[yearIdx];
+          var key = year + "_" + rating;
+          
+          if (dataMap[key]) {
+            completeData.push(dataMap[key]);
+          } else {
+            completeData.push({
+              year: year,
+              rating: rating,
+              count: 0,
+              games: []
+            });
+          }
+        }
+      }
+      
+      console.log("Total data points:", completeData.length); // Should be exactly 50
+      console.log("Ratings range:", d3.extent(completeData, d => d.rating));
+      console.log("Years:", d3.set(completeData, d => d.year).values());
+
+      // Create scales - X scale must go from 0 to 9 for full width
+      var xScale = d3.scaleLinear()
+        .domain([0, 9])
+        .range([0, widthLine]);
+
+      var yScale = d3.scaleLinear()
+        .domain([0, d3.max(completeData, d => d.count)])
+        .range([heightLine, 0]);
+
+      // Create line generator
+      var line = d3.line()
+        .x(d => xScale(d.rating))
+        .y(d => yScale(d.count));
+
+      // Group data by year
+      var dataByYear = d3.nest()
+        .key(d => d.year)
+        .entries(completeData);
+
+      // Draw lines
+      var linesGroup = gLine.append("g").attr("id", "lines");
+      
+      dataByYear.forEach(function (yearData) {
+        linesGroup.append("path")
+          .datum(yearData.values)
+          .attr("class", "line")
+          .attr("d", line)
+          .attr("stroke", colorScale(yearData.key));
+      });
+
+      // Add axes
+      var xAxis = d3.axisBottom(xScale);
+      var yAxis = d3.axisLeft(yScale);
+
+      gLine.append("g")
+        .attr("id", "x-axis-lines")
+        .attr("transform", "translate(0," + heightLine + ")")
+        .call(xAxis);
+
+      gLine.append("g")
+        .attr("id", "y-axis-lines")
+        .call(yAxis);
+
+      // Add axis labels
+      gLine.append("text")
+        .attr("class", "axis-label")
+        .attr("text-anchor", "middle")
+        .attr("x", widthLine / 2)
+        .attr("y", heightLine + 45)
+        .text("Rating");
+
+      gLine.append("text")
+        .attr("class", "axis-label")
+        .attr("text-anchor", "middle")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -heightLine / 2)
+        .attr("y", -50)
+        .text("Count of Board Games");
+
+      // CRITICAL: Add circles using D3's .selectAll().data().enter() paradigm
+      // This is required for Selenium to properly interact with circles
+      var circlesGroup = gLine.append("g").attr("id", "circles");
+      
+      var circles = circlesGroup.selectAll(".circle")
+        .data(completeData)
+        .enter()
+        .append("circle")
+        .attr("class", "circle")
+        .attr("cx", d => xScale(d.rating))
+        .attr("cy", d => yScale(d.count))
+        .attr("r", 5)
+        .attr("fill", d => colorScale(d.year))
+        .attr("stroke", "white")
+        .attr("stroke-width", 1)
+        .on("mouseover", function(d) {
+          // Enlarge circle
+          d3.select(this)
+            .transition()
+            .duration(200)
+            .attr("r", 8);
+          
+          // Show bar chart only if count > 0
+          if (d.count > 0 && d.games.length > 0) {
+            showBarChart(d.year, d.rating, d.games);
+          }
+        })
+        .on("mouseout", function() {
+          // Return circle to original size
+          d3.select(this)
+            .transition()
+            .duration(200)
+            .attr("r", 5);
+          
+          // Hide bar chart
+          hideBarChart();
+        });
+      
+      console.log("Circles created:", circlesGroup.selectAll(".circle").size(), "Expected: 50");
+
+      // Add legend
+      var legendGroup = gLine.append("g")
+        .attr("id", "legend")
+        .attr("transform", "translate(" + (widthLine + 20) + "," + 20 + ")");
+
+      years.forEach(function (year, i) {
+        var legendRow = legendGroup.append("g")
+          .attr("transform", "translate(0," + (i * 25) + ")");
+
+        legendRow.append("circle")
+          .attr("cx", 0)
+          .attr("cy", 0)
+          .attr("r", 5)
+          .attr("fill", colorScale(year));
+
+        legendRow.append("text")
+          .attr("x", 15)
+          .attr("y", 5)
+          .attr("class", "legend-text")
+          .text(year);
+      });
+
+      // Function to show bar chart
+      function showBarChart(year, rating, games) {
+        // Get top 5 games (already sorted by users_rated descending)
+        var top5 = games.slice(0, 5);
+        
+        // Update title
+        d3.select("#bar_chart_title")
+          .style("display", "block")
+          .text("Top 5 Most Rated Games of " + year + " with Rating " + rating);
+
+        // Show bar chart SVG
+        d3.select("#bar_chart").style("display", "block");
+
+        // Clear previous bars
+        gBar.selectAll("*").remove();
+
+        // Create scales for bar chart
+        var xScaleBar = d3.scaleLinear()
+          .domain([0, d3.max(top5, d => d.users_rated)])
+          .range([0, widthBar]);
+
+        // Y-axis shows game names (first 10 chars), sorted descending by users_rated
+        var yScaleBar = d3.scaleBand()
+          .domain(top5.map(d => d.name.substring(0, 10)))
+          .range([0, heightBar])
+          .padding(0.2);
+
+        // Add grid lines
+        var gridLines = d3.axisLeft(yScaleBar)
+          .tickSize(-widthBar)
+          .tickFormat("");
+
+        gBar.append("g")
+          .attr("class", "grid")
+          .call(gridLines);
+
+        // Add bars
+        var barsGroup = gBar.append("g").attr("id", "bars");
+        
+        barsGroup.selectAll(".bar")
+          .data(top5)
+          .enter()
+          .append("rect")
+          .attr("class", "bar")
+          .attr("x", 0)
+          .attr("y", d => yScaleBar(d.name.substring(0, 10)))
+          .attr("width", d => xScaleBar(d.users_rated))
+          .attr("height", yScaleBar.bandwidth());
+
+        // Add axes
+        var xAxisBar = d3.axisBottom(xScaleBar);
+        var yAxisBar = d3.axisLeft(yScaleBar);
+
+        gBar.append("g")
+          .attr("id", "x-axis-bars")
+          .attr("transform", "translate(0," + heightBar + ")")
+          .call(xAxisBar);
+
+        gBar.append("g")
+          .attr("id", "y-axis-bars")
+          .call(yAxisBar);
+
+        // Add axis labels
+        gBar.append("text")
+          .attr("id", "bar_x_axis_label")
+          .attr("class", "axis-label")
+          .attr("text-anchor", "middle")
+          .attr("x", widthBar / 2)
+          .attr("y", heightBar + 45)
+          .text("Number of users");
+
+        gBar.append("text")
+          .attr("id", "bar_y_axis_label")
+          .attr("class", "axis-label")
+          .attr("text-anchor", "middle")
+          .attr("transform", "rotate(-90)")
+          .attr("x", -heightBar / 2)
+          .attr("y", -130)
+          .text("Games");
+      }
+
+      // Function to hide bar chart
+      function hideBarChart() {
+        d3.select("#bar_chart_title").style("display", "none");
+        d3.select("#bar_chart").style("display", "none");
+      }
+
+    }).catch(function (error) {
+      console.log("Error loading data:", error);
+    });
+
+  </script>
+
+</body>
+</html>
